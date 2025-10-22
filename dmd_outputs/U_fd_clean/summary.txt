@@ -1,0 +1,10 @@
+Dataset: U_fd_clean
+Shape U: (64, 2049)
+dt: 0.0048828125
+K (train): 1000, H (forecast): 5000
+Rank: auto
+TLSQ: 0
+Train reconstruction rel L2 (last train col): 7.128019e-03
+Eval window rel L2 (mean): 1.269502e-02
+Eval window rel L2 (median): 1.093521e-02
+Eval window rel L2 (at end): 1.112183e-02
