@@ -283,7 +283,7 @@ def main():
                         help="Directory containing x.txt, dt.txt, U.txt, and S.txt (or override with --u_file/--s_file)")
     parser.add_argument("--u_file", type=str, default="U.txt",
                         help="Filename for u snapshots inside --root (shape (N,T) or (T,N))")
-    parser.add_argument("--s_file", type=str, default="S.txt",
+    parser.add_argument("--s_file", type=str, default="U_source.txt",
                         help="Filename for source S inside --root (shape (N,) or (N,T))")
     parser.add_argument("--out", type=str, default="dmd_ficks_outputs", help="Directory to write outputs")
     parser.add_argument("--name", type=str, default="ficks",

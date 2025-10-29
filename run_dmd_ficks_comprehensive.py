@@ -84,6 +84,7 @@ def run_ficks_comprehensive_analysis(name: str, U: np.ndarray, S: np.ndarray,
     if rank == "auto":
         dmd = DMD(r=None, energy_thresh=0.999, tlsq=tlsq)
     else:
+        print("using fed rank")
         dmd = DMD(r=int(rank), energy_thresh=0.999, tlsq=tlsq)
 
     res = dmd.fit(U_stacked, dt, n_train=K)
@@ -111,7 +112,7 @@ def run_ficks_comprehensive_analysis(name: str, U: np.ndarray, S: np.ndarray,
     for j in range(H):
         # Log current state before prediction
         current_time = (K + j) * dt
-        print(f"   - Step {j+1}/{H}: t = {current_time:.6f}")
+        # print(f"   - Step {j+1}/{H}: t = {current_time:.6f}")
         
         # Use DMD to predict one step ahead
         step = dmd.forecast(1, x_init=x_prev)
@@ -163,7 +164,7 @@ def run_ficks_comprehensive_analysis(name: str, U: np.ndarray, S: np.ndarray,
         x_prev = xj
         
         # Print injection verification every 10 steps
-        if (j + 1) % 10 == 0:
+        if (j + 1) % 500 == 0:
             print(f"     ✓ Injected S at t={current_time:.6f}, max S error before injection: {source_injection_log[-1]['s_max_error']:.2e}")
             print(f"     ✓ Injected bias=1.0, bias error before injection: {bias_injection_log[-1]['bias_error']:.2e}")
 
@@ -480,6 +481,7 @@ def main():
     print(f"  - Source shape: {S.shape}")
 
     # Run comprehensive analysis
+    print("rank read:",args.rank)
     results = run_ficks_comprehensive_analysis(
         args.name, U, S, x, dt, args.K, args.H, 
         rank=args.rank, tlsq=args.tlsq, outroot=outroot
