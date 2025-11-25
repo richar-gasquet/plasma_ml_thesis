@@ -26,6 +26,13 @@ def ensure_outdir(root: Path) -> None:
     """Create output directory if it doesn't exist."""
     root.mkdir(parents=True, exist_ok=True)
 
+def decimate_series(U: np.ndarray, dt: float, q: int) -> tuple[np.ndarray, float]:
+    """Keep every q-th snapshot and scale dt accordingly."""
+    q = int(q)
+    if q < 1:
+        raise ValueError("decimate q must be >= 1")
+    return U[:, ::q], dt * q
+
 def ensure_N_by_T(U, n_expected):
     """Ensure data is shaped (N, T). If it comes as (T, N) and N matches, transpose."""
     U = np.asarray(U)
@@ -55,7 +62,9 @@ def broadcast_S(S, N, T):
 
 def run_ficks_comprehensive_analysis(name: str, U: np.ndarray, S: np.ndarray, 
                                    x: np.ndarray, dt: float, K: int, H: int,
-                                   rank, tlsq: int, outroot: Path):
+                                   rank, tlsq: int, outroot: Path,
+                                   decimate_q: int = 1,
+                                   interior_only: bool = False):
     """
     Comprehensive DMD analysis for Fick's second law with detailed visualization.
     
@@ -67,6 +76,13 @@ def run_ficks_comprehensive_analysis(name: str, U: np.ndarray, S: np.ndarray,
     """
     print(f"\n=== Comprehensive Fick's Law DMD Analysis: {name} ===")
     
+    # Optional decimation
+    if decimate_q and int(decimate_q) > 1:
+        U, dt = decimate_series(U, dt, decimate_q)
+        # Broadcast S to (N, T) and decimate consistently
+        S_bt_for_decim = broadcast_S(S, U.shape[0], U.shape[1])  # temp grid may change if caller passed transposed
+        S = S_bt_for_decim
+    
     N, T = U.shape
     K = min(K, T)
     if K < 2:
@@ -76,11 +92,22 @@ def run_ficks_comprehensive_analysis(name: str, U: np.ndarray, S: np.ndarray,
     print("Step 1: Preparing data...")
     S_bt = broadcast_S(S, N, T)
     ones_row = np.ones((1, T))
-    U_stacked = np.vstack([U, S_bt, ones_row])
-    M = U_stacked.shape[0]  # 2N + 1
+    
+    if interior_only:
+        # Train only on interior, add bias row; do NOT include S
+        U_int = U[1:-1, :]
+        U_stacked = np.vstack([U_int, ones_row])  # shape: (N-2 + 1, T)
+        N_int = U_int.shape[0]
+    else:
+        # Original augmented state [u; S; 1]
+        U_stacked = np.vstack([U, S_bt, ones_row])
+        M = U_stacked.shape[0]  # 2N + 1
 
     # Step 2: Train DMD
-    print("Step 2: Training DMD on augmented state [u; S; 1]...")
+    if interior_only:
+        print("Step 2: Training DMD on augmented state [u_interior; 1]...")
+    else:
+        print("Step 2: Training DMD on augmented state [u; S; 1]...")
     if rank == "auto":
         dmd = DMD(r=None, energy_thresh=0.999, tlsq=tlsq)
     else:
@@ -92,87 +119,91 @@ def run_ficks_comprehensive_analysis(name: str, U: np.ndarray, S: np.ndarray,
     print(f"   - Energy threshold: 0.999")
     print(f"   - TLSQ parameter: {tlsq}")
 
-    # Step 3: Detailed rollout with verification
-    print("Step 3: Performing detailed rollout with S(x) and 1 injection...")
-    
-    # Initialize from last training snapshot
-    x_prev = U_stacked[:, K-1].copy()
-    x_prev[N:2*N] = S_bt[:, K-1]  # Inject exact S
-    x_prev[-1] = 1.0              # Inject exact bias
-    
-    # Storage for detailed analysis
-    preds = np.zeros((M, H))
-    source_injection_log = []  # Track S injection
-    bias_injection_log = []    # Track 1 injection
-    prediction_log = []        # Track DMD predictions before injection
-    
-    print(f"   - Starting rollout from time step {K-1}")
-    print(f"   - Forecasting {H} steps ahead")
-    
-    for j in range(H):
-        # Log current state before prediction
-        current_time = (K + j) * dt
-        # print(f"   - Step {j+1}/{H}: t = {current_time:.6f}")
+    # Step 3: Detailed rollout
+    if interior_only:
+        print("Step 3: Performing detailed rollout (interior-only, zero-Dirichlet padding)...")
+        x_prev = U_stacked[:, K-1].copy()  # [u_int; 1]
+        preds = np.zeros((U_stacked.shape[0], H))
+        source_injection_log = []
+        bias_injection_log = []
+        prediction_log = []
         
-        # Use DMD to predict one step ahead
-        step = dmd.forecast(1, x_init=x_prev)
+        print(f"   - Starting rollout from time step {K-1}")
+        print(f"   - Forecasting {H} steps ahead")
         
-        # Handle return format
-        if step.ndim == 1:
-            xj = step.copy()
-        else:
-            xj = step[:, -1].copy()
+        for j in range(H):
+            current_time = (K + j) * dt
+            step = dmd.forecast(1, x_init=x_prev)
+            xj = step if step.ndim == 1 else step[:, -1]
+            preds[:, j] = xj
+            x_prev = xj
+    else:
+        print("Step 3: Performing detailed rollout with S(x) and 1 injection...")
         
-        # Log DMD prediction before injection
-        prediction_log.append({
-            'step': j,
-            'time': current_time,
-            'dmd_u': xj[:N].copy(),
-            'dmd_s': xj[N:2*N].copy(),
-            'dmd_bias': xj[-1]
-        })
+        # Initialize from last training snapshot
+        x_prev = U_stacked[:, K-1].copy()
+        x_prev[N:2*N] = S_bt[:, K-1]  # Inject exact S
+        x_prev[-1] = 1.0              # Inject exact bias
         
-        # CRITICAL: Inject exact S and bias
-        idx = min(K + j, T - 1)
-        exact_s = S_bt[:, idx]
-        exact_bias = 1.0
+        # Storage for detailed analysis
+        M = U_stacked.shape[0]
+        preds = np.zeros((M, H))
+        source_injection_log = []  # Track S injection
+        bias_injection_log = []    # Track 1 injection
+        prediction_log = []        # Track DMD predictions before injection
         
-        # Log injection details
-        source_injection_log.append({
-            'step': j,
-            'time': current_time,
-            'dmd_predicted_s': xj[N:2*N].copy(),
-            'exact_s': exact_s.copy(),
-            's_error': np.linalg.norm(xj[N:2*N] - exact_s),
-            's_max_error': np.max(np.abs(xj[N:2*N] - exact_s))
-        })
+        print(f"   - Starting rollout from time step {K-1}")
+        print(f"   - Forecasting {H} steps ahead")
         
-        bias_injection_log.append({
-            'step': j,
-            'time': current_time,
-            'dmd_predicted_bias': xj[-1],
-            'exact_bias': exact_bias,
-            'bias_error': abs(xj[-1] - exact_bias)
-        })
-        
-        # Perform injection
-        xj[N:2*N] = exact_s
-        xj[-1] = exact_bias
-        
-        # Store and update
-        preds[:, j] = xj
-        x_prev = xj
-        
-        # Print injection verification every 10 steps
-        if (j + 1) % 500 == 0:
-            print(f"     ✓ Injected S at t={current_time:.6f}, max S error before injection: {source_injection_log[-1]['s_max_error']:.2e}")
-            print(f"     ✓ Injected bias=1.0, bias error before injection: {bias_injection_log[-1]['bias_error']:.2e}")
+        for j in range(H):
+            current_time = (K + j) * dt
+            step = dmd.forecast(1, x_init=x_prev)
+            xj = step if step.ndim == 1 else step[:, -1]
+            prediction_log.append({
+                'step': j,
+                'time': current_time,
+                'dmd_u': xj[:N].copy(),
+                'dmd_s': xj[N:2*N].copy(),
+                'dmd_bias': xj[-1]
+            })
+            idx = min(K + j, T - 1)
+            exact_s = S_bt[:, idx]
+            exact_bias = 1.0
+            source_injection_log.append({
+                'step': j,
+                'time': current_time,
+                'dmd_predicted_s': xj[N:2*N].copy(),
+                'exact_s': exact_s.copy(),
+                's_error': np.linalg.norm(xj[N:2*N] - exact_s),
+                's_max_error': np.max(np.abs(xj[N:2*N] - exact_s))
+            })
+            bias_injection_log.append({
+                'step': j,
+                'time': current_time,
+                'dmd_predicted_bias': xj[-1],
+                'exact_bias': exact_bias,
+                'bias_error': abs(xj[-1] - exact_bias)
+            })
+            xj[N:2*N] = exact_s
+            xj[-1] = exact_bias
+            preds[:, j] = xj
+            x_prev = xj
 
     # Step 4: Extract results
     print("Step 4: Extracting and analyzing results...")
-    Uhat_train_u = res.Uhat_train[:N, :]
-    U_future_u = preds[:N, :]
-    U_hat_full_u = np.hstack([Uhat_train_u, U_future_u])
+    if interior_only:
+        # res.Uhat_train is shape ((N-2+1), K). Extract interior part (drop bias row)
+        Uhat_train_int = res.Uhat_train[:N-2, :]
+        U_future_int = preds[:N-2, :]
+        U_hat_int = np.hstack([Uhat_train_int, U_future_int])  # (N-2, T_eval)
+        # Pad zeros at boundaries to form full field (N, T_eval)
+        T_eval = min(T, K + H)
+        U_hat_full_u = np.zeros((N, T_eval))
+        U_hat_full_u[1:-1, :] = U_hat_int[:, :T_eval]
+    else:
+        Uhat_train_u = res.Uhat_train[:N, :]
+        U_future_u = preds[:N, :]
+        U_hat_full_u = np.hstack([Uhat_train_u, U_future_u])
 
     # Evaluation
     T_eval = min(T, K + H)
@@ -405,16 +436,22 @@ def create_summary_report(name, rel_err, t_eval, K, H, dt, res, source_log, bias
         f.write("SOURCE INJECTION VERIFICATION:\n")
         f.write("-"*40 + "\n")
         f.write(f"Total injection steps: {len(source_log)}\n")
-        f.write(f"Max S error before injection: {max(log['s_max_error'] for log in source_log):.2e}\n")
-        f.write(f"Mean S error before injection: {np.mean([log['s_max_error'] for log in source_log]):.2e}\n")
-        f.write("✓ S(x) values injected exactly at every step\n\n")
+        if len(source_log) > 0:
+            f.write(f"Max S error before injection: {max(log['s_max_error'] for log in source_log):.2e}\n")
+            f.write(f"Mean S error before injection: {np.mean([log['s_max_error'] for log in source_log]):.2e}\n")
+            f.write("✓ S(x) values injected exactly at every step\n\n")
+        else:
+            f.write("(No source injection performed in this mode)\n\n")
         
         f.write("BIAS INJECTION VERIFICATION:\n")
         f.write("-"*40 + "\n")
         f.write(f"Total injection steps: {len(bias_log)}\n")
-        f.write(f"Max bias error before injection: {max(log['bias_error'] for log in bias_log):.2e}\n")
-        f.write(f"Mean bias error before injection: {np.mean([log['bias_error'] for log in bias_log]):.2e}\n")
-        f.write("✓ Bias value (1.0) injected exactly at every step\n\n")
+        if len(bias_log) > 0:
+            f.write(f"Max bias error before injection: {max(log['bias_error'] for log in bias_log):.2e}\n")
+            f.write(f"Mean bias error before injection: {np.mean([log['bias_error'] for log in bias_log]):.2e}\n")
+            f.write("✓ Bias value (1.0) injected exactly at every step\n\n")
+        else:
+            f.write("(No bias injection performed in this mode)\n\n")
         
         f.write("SINGULAR VALUES:\n")
         f.write("-"*40 + "\n")
@@ -443,6 +480,10 @@ def main():
                         help="'auto' for energy-based truncation, or an integer rank")
     parser.add_argument("--tlsq", type=int, default=0,
                         help="TLSQ parameter for noise robustness")
+    parser.add_argument("--decimate", type=int, default=1,
+                        help="Temporal decimation factor q (keep every q-th snapshot)")
+    parser.add_argument("--interior", action="store_true",
+                        help="Train on interior only (Dirichlet BCs) with bias and zero-padding")
     parser.add_argument("--root", type=str, default="./diffusion_bounded_linear",
                         help="Directory containing data files")
     parser.add_argument("--out", type=str, default="dmd_ficks_comprehensive_outputs", 
@@ -484,7 +525,8 @@ def main():
     print("rank read:",args.rank)
     results = run_ficks_comprehensive_analysis(
         args.name, U, S, x, dt, args.K, args.H, 
-        rank=args.rank, tlsq=args.tlsq, outroot=outroot
+        rank=args.rank, tlsq=args.tlsq, outroot=outroot,
+        decimate_q=args.decimate, interior_only=args.interior
     )
 
     print(f"\n🎉 Comprehensive analysis complete!")

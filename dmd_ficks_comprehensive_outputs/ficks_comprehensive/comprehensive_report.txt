@@ -7,30 +7,30 @@ EXPERIMENT SETUP:
 Training snapshots (K): 1000
 Forecast steps (H): 5000
 Time step (dt): 1.394895e-02
-DMD rank used: 30
+DMD rank used: 15
 Energy threshold: 0.999
 TLSQ parameter: 0
 
 PERFORMANCE METRICS:
 ----------------------------------------
-Mean relative L2 error: 3.981224e-04
-Median relative L2 error: 8.908853e-05
-Max relative L2 error: 1.874167e-03
-Min relative L2 error: 8.893346e-14
-Final relative L2 error: 1.874167e-03
+Mean relative L2 error: 5.362294e-03
+Median relative L2 error: 2.926192e-03
+Max relative L2 error: 1.832086e-02
+Min relative L2 error: 8.869621e-09
+Final relative L2 error: 1.832086e-02
 
 SOURCE INJECTION VERIFICATION:
 ----------------------------------------
 Total injection steps: 5000
-Max S error before injection: 2.12e-07
-Mean S error before injection: 6.39e-08
+Max S error before injection: 2.09e-06
+Mean S error before injection: 1.12e-06
 ✓ S(x) values injected exactly at every step
 
 BIAS INJECTION VERIFICATION:
 ----------------------------------------
 Total injection steps: 5000
-Max bias error before injection: 2.83e-05
-Mean bias error before injection: 8.51e-06
+Max bias error before injection: 2.78e-04
+Mean bias error before injection: 1.50e-04
 ✓ Bias value (1.0) injected exactly at every step
 
 SINGULAR VALUES:
@@ -38,7 +38,7 @@ SINGULAR VALUES:
 First 10 singular values: [1.99899087e+02 3.00277932e+01 9.02440653e+00 2.42722210e+00
  7.30185711e-01 2.17175013e-01 6.98238553e-02 2.00357252e-02
  4.13715311e-03 9.98771204e-04]
-Energy captured by rank 30: 1.000000
+Energy captured by rank 15: 1.000000
 
 CONCLUSIONS:
 ----------------------------------------

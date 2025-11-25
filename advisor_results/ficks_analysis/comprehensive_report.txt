@@ -4,41 +4,37 @@ COMPREHENSIVE DMD ANALYSIS REPORT: ficks_analysis
 
 EXPERIMENT SETUP:
 ----------------------------------------
-Training snapshots (K): 1000
-Forecast steps (H): 2000
-Time step (dt): 1.394895e-02
-DMD rank used: 3
+Training snapshots (K): 717
+Forecast steps (H): 5000
+Time step (dt): 1.394895e-01
+DMD rank used: 15
 Energy threshold: 0.999
 TLSQ parameter: 0
 
 PERFORMANCE METRICS:
 ----------------------------------------
-Mean relative L2 error: 8.542247e-02
-Median relative L2 error: 7.588927e-02
-Max relative L2 error: 2.042858e-01
-Min relative L2 error: 4.799529e-03
-Final relative L2 error: 2.042858e-01
+Mean relative L2 error: 2.325368e-07
+Median relative L2 error: 7.827536e-08
+Max relative L2 error: 5.661083e-05
+Min relative L2 error: 1.279659e-08
+Final relative L2 error: 1.301983e-07
 
 SOURCE INJECTION VERIFICATION:
 ----------------------------------------
-Total injection steps: 2000
-Max S error before injection: 2.56e-05
-Mean S error before injection: 1.16e-05
-✓ S(x) values injected exactly at every step
+Total injection steps: 0
+(No source injection performed in this mode)
 
 BIAS INJECTION VERIFICATION:
 ----------------------------------------
-Total injection steps: 2000
-Max bias error before injection: 3.42e-03
-Mean bias error before injection: 1.55e-03
-✓ Bias value (1.0) injected exactly at every step
+Total injection steps: 0
+(No bias injection performed in this mode)
 
 SINGULAR VALUES:
 ----------------------------------------
-First 10 singular values: [1.99899087e+02 3.00277932e+01 9.02440653e+00 2.42722210e+00
- 7.30185711e-01 2.17175013e-01 6.98238553e-02 2.00357252e-02
- 4.13715311e-03 9.98771204e-04]
-Energy captured by rank 3: 0.999842
+First 10 singular values: [1.59014096e+02 2.54102919e+01 8.50732458e+00 2.87148332e+00
+ 8.70341581e-01 2.89439869e-01 1.36929481e-01 6.06334502e-02
+ 2.89792972e-02 1.27516374e-02]
+Energy captured by rank 15: 1.000000
 
 CONCLUSIONS:
 ----------------------------------------
