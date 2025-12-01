@@ -26,12 +26,14 @@ import sys
 NPZ_PATH = "dmd_rollout_outputs_pydmd_refactored_ANALYSIS.npz"
 
 # Output directories
-BASE_DIR = "dmd_gaussian_plots"
+# BASE_DIR = "dmd_gaussian_plots"
 # BASE_DIR = "dmd_moving_average_plots"
-# BASE_DIR = "dmd_savgol_plots"
+BASE_DIR = "dmd_savgol_plots"
 # BASE_DIR = "dmd_bopdmd_plots"
-NORM_PLOTS_DIR = os.path.join(BASE_DIR, "dmd_norm_plots")
-SNAPSHOT_DIR = os.path.join(BASE_DIR, "dmd_snapshots")
+NORM_PLOTS_DIR = os.path.join(BASE_DIR, "dmd_norm_plots_time_smooth")
+SNAPSHOT_DIR = os.path.join(BASE_DIR, "dmd_snapshots_time_smooth")
+# NORM_PLOTS_DIR = os.path.join(BASE_DIR, "dmd_norm_plots")
+# SNAPSHOT_DIR = os.path.join(BASE_DIR, "dmd_snapshots")
 
 # NORM_PLOTS_DIR = "dmd_norm_plots"   # refreshed each run (NEW)
 # SNAPSHOT_DIR   = "dmd_snapshots"    # refreshed each run

@@ -59,9 +59,9 @@ def main():
 
     # 3) Apply spatial smoothing (Savitzky-Golay) to noisy data
     # Smooth data spatially
-    X_full_smooth = np.stack([gaussian_filter1d(X_full_time_smooth[:, j], sigma=5.0) for j in range(X_full_time_smooth.shape[1])], axis=1)
+    # X_full_smooth = np.stack([gaussian_filter1d(X_full_time_smooth[:, j], sigma=5.0) for j in range(X_full_time_smooth.shape[1])], axis=1)
     # X_full_smooth = np.stack([uniform_filter1d(X_full_time_smooth[:, j], size=10) for j in range(X_full_time_smooth.shape[1])], axis=1)
-    # X_full_smooth = np.stack([savgol_filter(X_full_time_smooth[:, j], window_length=spatial_window, polyorder=spatial_polyorder) for j in range(X_full_time_smooth.shape[1])], axis=1)
+    X_full_smooth = np.stack([savgol_filter(X_full_time_smooth[:, j], window_length=spatial_window, polyorder=spatial_polyorder) for j in range(X_full_time_smooth.shape[1])], axis=1)
 
     # X_full_smooth = np.stack([gaussian_filter1d(X_full_noisy[:, j], sigma=5.0) for j in range(X_full_noisy.shape[1])], axis=1)
     # X_full_smooth = np.stack([uniform_filter1d(X_full_noisy[:, j], size=10) for j in range(X_full_noisy.shape[1])], axis=1)
