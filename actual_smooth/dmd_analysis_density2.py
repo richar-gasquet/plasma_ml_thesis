@@ -35,14 +35,17 @@ def main():
 
     # DMD / snapshot settings
     decimate_q  = 1        # temporal decimation factor (1 = no decimation)
-    N           = 300      # number of train steps  (on decimated grid)
-    M           = 600      # number of forecast steps (on decimated grid)
+    
+    # Training step increments: train on first N steps, rollout for rest
+    start_train_steps = 100
+    train_step_increment = 50
+    max_train_steps = 600
 
     rank_mode   = "manual"   # "manual" or "energy"
     r_manual    = 20
     energy_thr  = 0.999
 
-    save_npz    = "dmd_density2_ANALYSIS.npz"
+    save_npz    = "dmd_density2_scenarios_ANALYSIS.npz"
     # ---------------------------------
 
     # 1) Load data and time, then build snapshot matrix (n_x, n_time)
@@ -52,93 +55,109 @@ def main():
     # 2) Temporal decimation
     X_full, dt_eff = decimate_series(X_full_noisy, dt, decimate_q)
     n_x, n_time = X_full.shape
-    validate_train_rollout(N, M, n_time)
+    
+    # Generate scenarios: train on first N steps, rollout for the rest
+    # N = training steps (uses snapshots 0 to N, which is N+1 snapshots)
+    # M should be such that we rollout to the end: N + M = n_time - 1
+    scenarios = []
+    for N in range(start_train_steps, max_train_steps + 1, train_step_increment):
+        M = n_time - 1 - N  # Rollout for remaining snapshots
+        if M > 0:  # Only add if there's data left to rollout
+            scenarios.append((N, M))
+    
+    print(f"Generated {len(scenarios)} scenarios:")
+    for N, M in scenarios:
+        print(f"  Train on first {N} steps, rollout for {M} steps (total: {N+M+1} snapshots)")
 
-    # 3) Interior extraction (Dirichlet-style) + affine augmentation
+    # 3) Interior extraction (Dirichlet-style) + affine augmentation (shared across scenarios)
     X_aug, n_int = build_interior_affine_augmented(X_full)
 
-    # 4) Rank selection
-    X_train = X_aug[:, :N + 1]
-    svd_rank, energy_captured = choose_svd_rank(X_train, rank_mode, r_manual, energy_thr)
+    # Storage for all scenarios
+    all_scenarios_data = {}
+    
+    # Process each scenario
+    for scenario_idx, (N, M) in enumerate(scenarios):
+        print(f"\n[Scenario {scenario_idx + 1}/{len(scenarios)}] N={N}, M={M}")
+        
+        try:
+            validate_train_rollout(N, M, n_time)
+        except ValueError as e:
+            print(f"  [SKIP] Invalid scenario: {e}")
+            continue
 
-    # 5) Fit DMD (discrete-time)
-    dmd, Phi, evals, b0 = fit_dmd(X_train, svd_rank)
+        # 4) Rank selection
+        X_train = X_aug[:, :N + 1]
+        svd_rank, energy_captured = choose_svd_rank(X_train, rank_mode, r_manual, energy_thr)
 
-    # 6) Rollouts (discrete & continuous)
-    X_hat_disc_full, X_hat_cont_full = rollout_full_field_full_length(
-        Phi, evals, b0, n_x, n_int, N, M, dt_eff
-    )
+        # 5) Fit DMD (discrete-time)
+        dmd, Phi, evals, b0 = fit_dmd(X_train, svd_rank)
 
-    # 7) Truncate to available truth for comparisons
-    t_max   = min(N + M, n_time - 1)
-    Y_truth = X_full[:, :t_max + 1]
-    Yhat_d  = X_hat_disc_full[:, :t_max + 1]
-    Yhat_c  = X_hat_cont_full[:, :t_max + 1]
+        # 6) Rollouts (discrete & continuous)
+        X_hat_disc_full, X_hat_cont_full = rollout_full_field_full_length(
+            Phi, evals, b0, n_x, n_int, N, M, dt_eff
+        )
 
-    # 8) Frobenius error norms (per time)
-    fro_truth_t = np.linalg.norm(Y_truth, axis=0)               # ||Y(t)||_F
-    err_disc_abs_t = np.linalg.norm(Yhat_d - Y_truth, axis=0)   # ||E_disc(t)||_F
-    err_cont_abs_t = np.linalg.norm(Yhat_c - Y_truth, axis=0)   # ||E_cont(t)||_F
+        # 7) Truncate to available truth for comparisons
+        t_max   = min(N + M, n_time - 1)
+        Y_truth = X_full[:, :t_max + 1]
+        Yhat_d  = X_hat_disc_full[:, :t_max + 1]
+        Yhat_c  = X_hat_cont_full[:, :t_max + 1]
 
-    # Relative (divide by ||Y(t)||_F); safe divide
-    err_disc_rel_t = np.divide(
-        err_disc_abs_t,
-        fro_truth_t,
-        out=np.zeros_like(err_disc_abs_t),
-        where=fro_truth_t > 0,
-    )
-    err_cont_rel_t = np.divide(
-        err_cont_abs_t,
-        fro_truth_t,
-        out=np.zeros_like(err_cont_abs_t),
-        where=fro_truth_t > 0,
-    )
+        # 8) Frobenius error norms (per time)
+        fro_truth_t = np.linalg.norm(Y_truth, axis=0)               # ||Y(t)||_F
+        err_disc_abs_t = np.linalg.norm(Yhat_d - Y_truth, axis=0)   # ||E_disc(t)||_F
+        err_cont_abs_t = np.linalg.norm(Yhat_c - Y_truth, axis=0)   # ||E_cont(t)||_F
 
-    # Normalized-to-initial (divide by ||Y(0)||_F)
-    fro0 = fro_truth_t[0] if fro_truth_t.size and fro_truth_t[0] != 0 else 1.0
-    err_disc_norm0_t = err_disc_abs_t / fro0
-    err_cont_norm0_t = err_cont_abs_t / fro0
+        # Relative (divide by ||Y(t)||_F); safe divide
+        err_disc_rel_t = np.divide(
+            err_disc_abs_t,
+            fro_truth_t,
+            out=np.zeros_like(err_disc_abs_t),
+            where=fro_truth_t > 0,
+        )
+        err_cont_rel_t = np.divide(
+            err_cont_abs_t,
+            fro_truth_t,
+            out=np.zeros_like(err_cont_abs_t),
+            where=fro_truth_t > 0,
+        )
 
-    # 9) Save all required data
-    np.savez_compressed(
-        save_npz,
-        # Raw inputs & configuration
-        X_full_original=X_full_noisy,     # (n_x, n_time) transposed from original
-        X_full_decimated=X_full,          # (n_x, n_time_decimated)
-        dt=dt,
-        dt_eff=dt_eff,
-        decimate_q=decimate_q,
-        N=N,
-        M=M,
-        rank_mode=rank_mode,
-        svd_rank=svd_rank,
-        energy_captured=energy_captured,
-        # DMD factors
-        modes=Phi,
-        evals=evals,
-        amplitudes=b0,
-        singular_values=np.array(getattr(dmd, "singular_values", [])),
-        # Predictions (full field, full-length rollout 0..N+M)
-        X_hat_disc_full=X_hat_disc_full,
-        X_hat_cont_full=X_hat_cont_full,
-        # Truth & truncated predictions for aligned comparisons (0..t_max)
-        Y_truth=Y_truth,
-        Yhat_disc=Yhat_d,
-        Yhat_cont=Yhat_c,
-        # Time axes
-        t_decimated=np.arange(t_max + 1) * dt_eff,
-        t_full_prediction_window=np.arange(N + M + 1) * dt_eff,
-        t_max=t_max,
-        # Error Frobenius norms (time-resolved)
-        err_disc_abs_t=err_disc_abs_t,
-        err_cont_abs_t=err_cont_abs_t,
-        err_disc_rel_t=err_disc_rel_t,
-        err_cont_rel_t=err_cont_rel_t,
-        err_disc_norm0_t=err_disc_norm0_t,
-        err_cont_norm0_t=err_cont_norm0_t,
-    )
+        # Normalized-to-initial (divide by ||Y(0)||_F)
+        fro0 = fro_truth_t[0] if fro_truth_t.size and fro_truth_t[0] != 0 else 1.0
+        err_disc_norm0_t = err_disc_abs_t / fro0
+        err_cont_norm0_t = err_cont_abs_t / fro0
 
-    print(f"[OK] CCP density2 DMD analysis complete. Data saved to: {save_npz}")
+        # Store scenario data
+        scenario_key = f"scenario_{scenario_idx}"
+        all_scenarios_data[f"{scenario_key}_N"] = N
+        all_scenarios_data[f"{scenario_key}_M"] = M
+        all_scenarios_data[f"{scenario_key}_t_decimated"] = np.arange(t_max + 1) * dt_eff
+        all_scenarios_data[f"{scenario_key}_err_disc_rel_t"] = err_disc_rel_t
+        all_scenarios_data[f"{scenario_key}_err_cont_rel_t"] = err_cont_rel_t
+        all_scenarios_data[f"{scenario_key}_err_disc_abs_t"] = err_disc_abs_t
+        all_scenarios_data[f"{scenario_key}_err_cont_abs_t"] = err_cont_abs_t
+        all_scenarios_data[f"{scenario_key}_err_disc_norm0_t"] = err_disc_norm0_t
+        all_scenarios_data[f"{scenario_key}_err_cont_norm0_t"] = err_cont_norm0_t
+        all_scenarios_data[f"{scenario_key}_t_max"] = t_max
+        
+        print(f"  [OK] Completed scenario N={N}, M={M}")
+
+    # 9) Save all scenarios data
+    all_scenarios_data.update({
+        # Shared data
+        "X_full_original": X_full_noisy,
+        "X_full_decimated": X_full,
+        "dt": dt,
+        "dt_eff": dt_eff,
+        "decimate_q": decimate_q,
+        "rank_mode": rank_mode,
+        "num_scenarios": len(scenarios),
+        "scenarios": scenarios,
+    })
+    
+    np.savez_compressed(save_npz, **all_scenarios_data)
+
+    print(f"\n[OK] CCP density2 DMD multi-scenario analysis complete. Data saved to: {save_npz}")
 
 
 # ==========================================================
